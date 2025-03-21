@@ -239,3 +239,26 @@ SELECT DISTINCT erp_gndr,
                     WHEN UPPER(TRIM(erp_gndr)) IN ('M', 'MALE') THEN 'Male'
                     ELSE 'n/a' END as erp_gndr
 FROM silver.erp_cust;
+
+---------------------------------------------
+-- ERP Location Information
+---------------------------------------------
+
+INSERT INTO silver.erp_loc (erp_cid, erp_cntry)
+SELECT REPLACE(erp_cid, '-', '')    AS erp_cid,  -- Remove unnecessary characters
+       CASE
+           WHEN TRIM(erp_cntry) = 'DE' THEN 'Germany'
+           WHEN TRIM(erp_cntry) IN ('USA', 'US') THEN 'United States'
+           WHEN TRIM(erp_cntry) = '' OR erp_cntry IS NULL THEN 'n/a'
+           ELSE TRIM(erp_cntry) END AS erp_cntry -- Normalize and Handle missing or blank country codes
+FROM bronze.erp_loc;
+
+-- Data Standardization & Consistency
+SELECT DISTINCT erp_cntry
+FROM bronze.erp_loc
+ORDER BY erp_cntry;
+
+-- Final Check
+SELECT *
+FROM silver.erp_loc
+
