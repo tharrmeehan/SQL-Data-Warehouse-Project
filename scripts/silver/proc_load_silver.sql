@@ -2,7 +2,9 @@
 -- CRM CUSTOMER INFORMATION
 ---------------------------------------------
 
--- Check for Nulls or Duplicates
+-- Truncate Table so no duplicates appear
+TRUNCATE TABLE silver.crm_cust_info;
+-- Insert into table
 INSERT INTO silver.crm_cust_info (cst_id, cst_key, cst_firstname, cst_lastname, cst_material_status, cst_gndr,
                                   cst_create_date)
 SELECT cst_id,
@@ -103,6 +105,9 @@ GROUP BY prd_id
 HAVING COUNT(*) > 1
     OR prd_id IS NULL;
 
+-- Truncate Table so no duplicates appear
+TRUNCATE TABLE silver.crm_prd_info;
+-- Insert into table
 INSERT INTO silver.crm_prd_info(prd_id, cat_id, prd_key, prd_nm, prd_cost, prd_line, prd_start_dt, prd_end_dt)
 SELECT prd_id,
        REPLACE(SUBSTRING(prd_key, 1, 5), '-', '_')                                            AS cat_id,
@@ -137,6 +142,10 @@ WHERE prd_key IN ('AC-HE-HL-U509-R', 'AC-HE-HL-U509');
 ---------------------------------------------
 
 --- Data Overview ---
+
+-- Truncate Table so no duplicates appear
+TRUNCATE TABLE silver.crm_sls_details;
+-- Insert into table
 INSERT INTO silver.crm_sls_details(sls_ord_num, sls_prd_key, sls_cust_id, sls_order_dt, sls_ship_dt, sls_due_dt,
                                    sls_sales, sls_quantity, sls_price)
 SELECT sls_ord_num,
@@ -178,12 +187,11 @@ FROM bronze.crm_sls_details;
  */
 
 --- Check for Invalid Dates (Negatives or Zeros) ---
-SELECT NULLIF(sls_order_dt, 0) AS sls_order_dt
+SELECT sls_order_dt
 FROM silver.crm_sls_details
-WHERE sls_order_dt <= 0
-   OR length(sls_order_dt) != 8
-   OR sls_order_dt > 2050 - 01 - 01
-   OR sls_order_dt < 1900 - 01 - 01;
+WHERE sls_order_dt IS NULL
+   OR sls_order_dt < DATE '1900-01-01'
+   OR sls_order_dt > DATE '2050-01-01';
 
 --- Check for Invalid Date Orders (Order date can't be later than shipping/due date) ---
 SELECT *
@@ -212,6 +220,10 @@ from silver.crm_sls_details;
 ---------------------------------------------
 -- ERP Customer Information
 ---------------------------------------------
+
+-- Truncate Table so no duplicates appear
+TRUNCATE TABLE silver.erp_cust;
+-- Insert into table
 INSERT INTO silver.erp_cust(erp_cid, erp_dt, erp_gndr)
 SELECT CASE WHEN erp_cid LIKE 'NAS%' THEN SUBSTRING(erp_cid, 4, LENGTH(erp_cid)) ELSE erp_cid END AS erp_cid,
        CASE
@@ -244,6 +256,9 @@ FROM silver.erp_cust;
 -- ERP Location Information
 ---------------------------------------------
 
+-- Truncate Table so no duplicates appear
+TRUNCATE TABLE silver.erp_loc;
+-- Insert into table
 INSERT INTO silver.erp_loc (erp_cid, erp_cntry)
 SELECT REPLACE(erp_cid, '-', '')    AS erp_cid,  -- Remove unnecessary characters
        CASE
@@ -260,5 +275,22 @@ ORDER BY erp_cntry;
 
 -- Final Check
 SELECT *
-FROM silver.erp_loc
+FROM silver.erp_loc;
 
+---------------------------------------------
+-- ERP Category Information
+---------------------------------------------
+
+-- Truncate Table so no duplicates appear
+TRUNCATE TABLE silver.erp_px_cat;
+-- Insert into table
+INSERT INTO silver.erp_px_cat(erp_id, erp_cat, erp_subcat, erp_maintenance)
+SELECT erp_id, erp_cat, erp_subcat, erp_maintenance
+FROM bronze.erp_px_cat;
+
+-- Check for unwanted Spaces
+SELECT * from bronze.erp_px_cat
+WHERE erp_px_cat.erp_maintenance != TRIM(erp_maintenance);
+
+-- Data Standardization & Consistency
+SELECT DISTINCT erp_px_cat.erp_cat FROM bronze.erp_px_cat;
