@@ -15,6 +15,16 @@ WARNING:
 
 -- Create Table for Bronze Schema containing Customer Information from a sample CRM
 
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE c.relname = 'crm_cust_info' AND n.nspname = 'silver'
+    ) THEN
+        DROP TABLE silver.crm_cust_info;
+    END IF;
+END $$;
 CREATE TABLE silver.crm_cust_info (
     cst_id INT,
     cst_key VARCHAR(50),
@@ -26,24 +36,45 @@ CREATE TABLE silver.crm_cust_info (
     dwh_create_date TIMESTAMP DEFAULT NOW()
 );
 
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE c.relname = 'crm_prd_info' AND n.nspname = 'silver'
+    ) THEN
+        DROP TABLE silver.crm_prd_info;
+    END IF;
+END $$;
 CREATE TABLE silver.crm_prd_info (
     prd_id INT,
+    cat_id VARCHAR(50),
     prd_key VARCHAR(50),
     prd_nm VARCHAR(50),
     prd_cost INT,
-    prd_line VARCHAR(1),
+    prd_line VARCHAR(50),
     prd_start_dt DATE,
     prd_end_dt DATE,
     dwh_create_date TIMESTAMP DEFAULT NOW()
 );
 
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE c.relname = 'crm_sls_details' AND n.nspname = 'silver'
+    ) THEN
+        DROP TABLE silver.crm_sls_details;
+    END IF;
+END $$;
 CREATE TABLE silver.crm_sls_details (
     sls_ord_num VARCHAR(10),
     sls_prd_key VARCHAR(15),
     sls_cust_id INT,
-    sls_order_dt INT,
-    sls_ship_dt INT,
-    sls_due_dt INT,
+    sls_order_dt DATE,
+    sls_ship_dt DATE,
+    sls_due_dt DATE,
     sls_sales INT,
     sls_quantity INT,
     sls_price INT,
