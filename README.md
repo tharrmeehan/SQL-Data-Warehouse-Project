@@ -1,28 +1,20 @@
 # SQL Data Warehouse
 
-A layered data warehouse built on PostgreSQL following the medallion architecture. Six heterogeneous CSV sources are ingested into a Bronze staging layer, cleansed and normalised in Silver, then modelled into a star schema in Gold — producing analytics-ready fact and dimension tables suited for direct BI consumption.
+A PostgreSQL data-warehouse project adapted from [Data With Baraa’s SQL Data Warehouse project](https://github.com/DataWithBaraa/sql-data-warehouse-project). It demonstrates a medallion pipeline: six example CSV files load into Bronze, are transformed in Silver, and feed Gold star-schema views for analytics. The CSVs are examples, not independent source systems.
 
 ---
 
 ## Architecture
 
-```
-6× CSV Sources
-      │
-      ▼  proc_load_bronze.sql    (raw ingestion, no transformation)
-Bronze Layer   (staging tables, exact source representation)
-      │
-      ▼  proc_load_silver.sql    (type casting, deduplication, NULL handling,
-      │                           standardisation, surrogate key assignment)
-Silver Layer   (cleansed, conformed, normalised)
-      │
-      ▼  ddl_gold.sql            (views over Silver)
-Gold Layer     (star schema — fact + dimension tables, analytics-ready)
-      │
-      ▼  SQL reports / BI tools
+```mermaid
+flowchart LR
+    CSV -->|"public.load_bronze() · COPY"| B["Bronze tables"]
+    B -->|"silver.load_silver()"| S["Silver tables"]
+    S -->|"Gold views"| G["Gold customer/product dimensions and sales fact"]
+    G --> A["Analytics and quality-check queries"]
 ```
 
-All DDL and ETL logic is implemented as SQL stored procedures, keeping the entire pipeline database-native with no external orchestration dependency.
+`scripts/bronze/ddl_bronze.sql` creates Bronze tables; `scripts/bronze/proc_load_bronze.sql` defines `load_bronze()` in `public`. The procedure uses PostgreSQL server-side `COPY` from `/home/dwh_project/datasets/`. Silver DDL and `silver.load_silver()` are in the Silver scripts. `scripts/gold/ddl_gold.sql` creates views over Silver. All six source files are sample CSVs, not independent source systems.
 
 ---
 
@@ -32,46 +24,50 @@ PostgreSQL, Docker, SQL (DDL + stored procedures), Medallion Architecture, Star 
 
 ---
 
-## Key Methodologies
+## Local Reproduction
 
-- **Medallion layering** — Bronze preserves source data verbatim, making re-processing safe. Silver applies all transformation logic in one place (type casting, deduplication, NULL coalescing, standardisation), so downstream layers are never affected by upstream schema drift without an explicit Silver migration.
+Requires Docker only; the following runs `psql` inside a disposable PostgreSQL 15 container, with the repository mounted read-only. It publishes no host port and uses only the committed example CSVs. **The container and its database are disposable; do not run this against a database or container with data you need.** It does not remove or modify any pre-existing container.
 
-- **Stored-procedure ETL** — each layer transition is encapsulated in a stored procedure (`proc_load_bronze`, `proc_load_silver`). This keeps the pipeline declarative, transactional, and testable without an orchestration tool.
-
-- **Star schema in Gold** — fact tables hold measurable events with foreign keys to dimension tables, optimising query performance for aggregations and slice-and-dice analytics without needing ORM or application-layer joins.
-
-- **Surrogate keys** — Silver assigns integer surrogate keys independently of source natural keys, decoupling the warehouse from upstream key changes.
-
----
-
-## Production Metrics & Validation
-
-- Six independent source systems integrated into a single conformed model.
-- Query patterns validated against the Gold layer using the SQL analytics scripts in `docs/`.
-- Data catalog (`docs/data_catalog.md`) documents every table, column, and transformation decision.
-
----
-
-## Local Replication
-
-Prerequisites: Docker, psql (or any PostgreSQL client).
+From the repository root:
 
 ```bash
-git clone https://github.com/tharrmeehan/SQL-Data-Warehouse-Project.git
-cd SQL-Data-Warehouse-Project
+set -eu
+container="sql-warehouse-demo-$$"
+docker run --rm -d --name "$container" \
+  -v "$PWD:/workspace:ro" \
+  -v "$PWD/datasets:/home/dwh_project/datasets:ro" \
+  -e POSTGRES_PASSWORD=postgres postgres:15
+trap 'docker stop "$container" >/dev/null' EXIT
 
-# Spin up PostgreSQL
-docker run --name dwh -e POSTGRES_PASSWORD=postgres -p 5432:5432 -d postgres:15
+until docker exec "$container" pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>&1; do sleep 1; done
+docker exec "$container" psql -X -v ON_ERROR_STOP=1 -U postgres -d postgres \
+  -c 'CREATE DATABASE datawarehouse;'
+docker exec "$container" psql -X -v ON_ERROR_STOP=1 -U postgres -d datawarehouse \
+  -c 'CREATE SCHEMA bronze; CREATE SCHEMA silver; CREATE SCHEMA gold;'
+for script in \
+  scripts/bronze/ddl_bronze.sql \
+  scripts/bronze/proc_load_bronze.sql \
+  scripts/silver/ddl_silver.sql \
+  scripts/silver/proc_load_silver.sql; do
+  docker exec "$container" psql -X -v ON_ERROR_STOP=1 -U postgres -d datawarehouse \
+    -f "/workspace/$script"
+done
+docker exec "$container" psql -X -v ON_ERROR_STOP=1 -U postgres -d datawarehouse \
+  -c 'SET search_path TO bronze, public; CALL public.load_bronze();'
+docker exec "$container" psql -X -v ON_ERROR_STOP=1 -U postgres -d datawarehouse \
+  -c 'CALL silver.load_silver();'
+docker exec "$container" psql -X -v ON_ERROR_STOP=1 -U postgres -d datawarehouse \
+  -f /workspace/scripts/gold/ddl_gold.sql
 
-# Initialise schema
-psql -h localhost -U postgres -f scripts/init_database.sql
+docker exec "$container" psql -X -v ON_ERROR_STOP=1 -U postgres -d datawarehouse \
+  -c 'SELECT (SELECT count(*) FROM gold.dim_customers) AS customers, (SELECT count(*) FROM gold.dim_products) AS products, (SELECT count(*) FROM gold.fact_sales) AS sales;'
 
-# Load layers in order
-psql -h localhost -U postgres -d datawarehouse -f scripts/bronze/ddl_bronze.sql
-psql -h localhost -U postgres -d datawarehouse -f scripts/bronze/proc_load_bronze.sql
-psql -h localhost -U postgres -d datawarehouse -f scripts/silver/ddl_silver.sql
-psql -h localhost -U postgres -d datawarehouse -f scripts/silver/proc_load_silver.sql
-psql -h localhost -U postgres -d datawarehouse -f scripts/gold/ddl_gold.sql
+# Optional diagnostics; exploratory Silver queries may return rows.
+docker exec "$container" psql -X -v ON_ERROR_STOP=1 -U postgres -d datawarehouse \
+  -f /workspace/tests/quality_checks_silver.sql
+docker exec "$container" psql -X -v ON_ERROR_STOP=1 -U postgres -d datawarehouse \
+  -f /workspace/tests/quality_checks_gold.sql
+
 ```
 
 ---
@@ -89,7 +85,7 @@ psql -h localhost -U postgres -d datawarehouse -f scripts/gold/ddl_gold.sql
 │   │   └── proc_load_silver.sql
 │   └── gold/
 │       └── ddl_gold.sql
-├── datasets/              # Source CSV files
+├── datasets/              # Example source CSV files
 ├── docs/
 │   ├── data_catalog.md
 │   ├── data_architecture.png
